@@ -1,18 +1,26 @@
+// ============================================================
+// auth.router.js
+// ============================================================
 import { Router } from "express";
-import { upload } from "../middlewares/multer.middleware.js";
+import {
+  register,
+  verifyOTP,
+  login,
+  forgotPassword,
+  verifyResetOTP,
+  resetPassword,
+  logout,
+} from "../controllers/auth.contollers.js"
+import { protect } from "../middlewares/auth.middleware.js";
 
-import { register } from "../controllers/auth.contollers.js";
-import { verifyOTP } from "../controllers/auth.contollers.js";
-import { login } from "../controllers/auth.contollers.js";
+const authRouter = Router();
 
-const authrouter = Router();
+authRouter.route("/register").post(register);
+authRouter.route("/verify-otp").post(verifyOTP);
+authRouter.route("/login").post(login);
+authRouter.route("/forgot-password").post(forgotPassword);
+authRouter.route("/verify-reset-otp").post(verifyResetOTP);
+authRouter.route("/reset-password").post(resetPassword);
+authRouter.route("/logout").post(protect, logout);
 
-
-authrouter.route("/register").post(register)
-authrouter.route("/verifyopt").post(verifyOTP)
-authrouter.route("/login").post(login)
-
-
-
-
-export default authrouter;
+export default authRouter;

@@ -4,7 +4,7 @@
 
 import { asynchandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { ApiResponse } from "../utils/ApiResponse.js";
+import ApiResponse from "../utils/ApiResponse.js";
 import { Product } from "../models/product.model.js";
 import uploadImage from "../utils/cloudinary.js";
 import cloudinary from "../utils/cloudinary.js";
@@ -40,6 +40,18 @@ export const getAllProducts = asynchandler(async (req, res) => {
     page,
     totalPages: Math.ceil(total / limit),
   }, "Products fetched successfully"));
+});
+
+// ADD THIS TO product.controller.js
+export const getProductAnalytics = asynchandler(async (req, res) => {
+  const product = await Product.findById(req.params.productid)
+    .select("title analytics stock price");
+
+  if (!product) throw new ApiError(404, "Product not found");
+
+  return res.status(200).json(
+    new ApiResponse(200, product, "Analytics fetched successfully")
+  );
 });
 
 // GET SINGLE PRODUCT (public) — increments views

@@ -152,9 +152,19 @@ export const login = asynchandler(async (req, res) => {
 
   const { accessToken, refreshToken } = await issueTokens(user, res);
 
-  res.status(200).json(
-    new ApiResponse(200, { accessToken, refreshToken, role: user.role }, "Logged in successfully")
+ res.status(200).json(
+    new ApiResponse(200, {
+      _id:          user._id,        // ✅ added
+      accessToken,
+      refreshToken,
+      role:         user.role,
+      email:        user.email,      // ✅ useful for frontend display
+      username:     user.username,   // ✅ useful for frontend display
+      fullname:     user.fullname,   // ✅ useful for frontend display
+      avatar:       user.avatar,     // ✅ useful for navbar profile pic
+    }, "Logged in successfully")
   );
+
 });
 
 // ─── FORGOT PASSWORD: send OTP ───────────────────────────────────────────────
@@ -213,21 +223,23 @@ export const verifyResetOTP = asynchandler(async (req, res) => {
 
 // ─── RESET PASSWORD ────────────────────────────────────────────
 // POST /api/auth/reset-password
-
 export const resetPassword = asynchandler(async (req, res) => {
-  const { email, newPassword } = req.body;
+  const { email, otp, newPassword } = req.body; // 👈 add otp here
 
   const user = await User.findOne({ email });
-  if (!user) {
-    throw new ApiError(404, "User not found");
-  }
+  if (!user) throw new ApiError(404, "User not found");
 
-  user.password = newPassword; // pre save hook will hash it
+  // verify otp here instead of separate endpoint
+  if (user.otp !== otp) throw new ApiError(400, "Invalid OTP");
+  if (user.otpExpiry < new Date()) throw new ApiError(400, "OTP expired");
+
+  // clear otp + set new password
+  user.otp = null;
+  user.otpExpiry = null;
+  user.password = newPassword;
   await user.save();
 
-  res.status(200).json(
-    new ApiResponse(200, {}, "Password reset successfully. Please login.")
-  );
+  res.status(200).json(new ApiResponse(200, {}, "Password reset successfully"));
 });
 
 // ─── LOGOUT ──────────────────────────────────────────────────────────────────

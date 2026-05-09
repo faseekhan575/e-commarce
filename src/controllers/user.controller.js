@@ -4,10 +4,10 @@
 
 import { asynchandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { ApiResponse } from "../utils/ApiResponse.js";
+import ApiResponse from "../utils/ApiResponse.js";
 import { User } from "../models/user.models.js";
 import uploadImage from "../utils/cloudinary.js";
-import cloudinary from "../utils/cloudinary.js";
+import cloudinary from "cloudinary"
 
 // GET MY PROFILE
 export const getProfile = asynchandler(async (req, res) => {

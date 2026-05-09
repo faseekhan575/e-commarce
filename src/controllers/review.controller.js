@@ -4,9 +4,9 @@
 
 import { asynchandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { ApiResponse } from "../utils/ApiResponse.js";
+import ApiResponse from "../utils/ApiResponse.js";
 import { Review } from "../models/review.model.js";
-import { Order } from "../models/order.model.js";
+import { Order } from "../models/orders.model.js";
 import uploadImage from "../utils/cloudinary.js";
 import cloudinary from "../utils/cloudinary.js";
 

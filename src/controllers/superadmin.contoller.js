@@ -1,6 +1,6 @@
 import { User } from "../models/user.models.js";          // ❌ missing .js
 import { ApiError } from "../utils/ApiError.js";           // ❌ missing .js
-import { ApiResponse } from "../utils/ApiResponse.js";     // ❌ was default import
+import ApiResponse from "../utils/ApiResponse.js";
 import { asynchandler } from "../utils/asyncHandler.js";   // ❌ missing .js
 
 // ─── GET ALL USERS ───────────────────────────────────────────
