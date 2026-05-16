@@ -246,14 +246,15 @@ export const resetPassword = asynchandler(async (req, res) => {
 export const logout = asynchandler(async (req, res) => {
   const token = req.cookies?.refreshToken;
 
-  // remove only this device's token from array
   await User.findByIdAndUpdate(req.user._id, {
     $pull: { tokens: token },
   });
 
+  const cookieOptions = { httpOnly: true, secure: true, sameSite: "none" };
+
   res
-    .clearCookie("accessToken")
-    .clearCookie("refreshToken")
+    .clearCookie("accessToken", cookieOptions)
+    .clearCookie("refreshToken", cookieOptions)
     .status(200)
     .json(new ApiResponse(200, {}, "Logged out successfully"));
 });
