@@ -5,7 +5,7 @@
 import { asynchandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import { Category } from "../models/category.model.js";
+import { Category } from "../models/Category.model.js";
 import uploadImage from "../utils/cloudinary.js";
 import cloudinary from "../utils/cloudinary.js";
 
