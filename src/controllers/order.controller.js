@@ -9,7 +9,7 @@ import ApiResponse from "../utils/ApiResponse.js";
 import { Order } from "../models/orders.model.js";
 import { Product } from "../models/product.model.js";
 import { Cart } from "../models/cart.model.js";
-
+import { io } from "../index.js";
 import { Parser } from "json2csv";
 
 // ===========================================================
@@ -99,14 +99,13 @@ export const placeOrder = asynchandler(async (req, res) => {
     user: req.user._id,
   });
 
-  // Socket notification
-  if (req.io) {
-    req.io.to("admin_room").emit("new_order", {
-      orderId: order._id,
-      userName: req.user.fullname,
-      total: totalAmount,
-    });
-  }
+ // Socket notification
+io.to("admin_room").emit("new_order", {
+  orderId: order._id,
+  totalAmount,
+  createdAt: order.createdAt,
+  userName: req.user.fullname,
+});
 
   return res
     .status(201)
