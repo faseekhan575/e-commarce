@@ -25,3 +25,4 @@ const uploadImage = async (fileBuffer, resourceType = "auto") => {
 };
 
 export default uploadImage;
+export { cloudinary };

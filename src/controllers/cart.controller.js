@@ -9,10 +9,12 @@ import { Cart } from "../models/cart.model.js";
 import { Product } from "../models/product.model.js";
 import { trackAddToCart } from "./product.controller.js";
 
+const POPULATE_FIELDS = "title images price discountPrice stock isActive category";
+
 // GET MY CART
 export const getCart = asynchandler(async (req, res) => {
   const cart = await Cart.findOne({ user: req.user._id })
-    .populate("items.product", "title images price discountPrice stock isActive");
+    .populate("items.product", POPULATE_FIELDS);
 
   if (!cart) return res.status(200).json(new ApiResponse(200, { items: [] }, "Cart is empty"));
   res.status(200).json(new ApiResponse(200, cart, "Cart fetched successfully"));
@@ -31,7 +33,6 @@ export const addToCart = asynchandler(async (req, res) => {
   let cart = await Cart.findOne({ user: req.user._id });
 
   if (!cart) {
-    // first time — create cart
     cart = await Cart.create({
       user:  req.user._id,
       items: [{ product: productId, quantity, price: product.price }],
@@ -39,17 +40,18 @@ export const addToCart = asynchandler(async (req, res) => {
   } else {
     const existingItem = cart.items.find((i) => i.product.toString() === productId);
     if (existingItem) {
-      existingItem.quantity += quantity; // increment if already in cart
+      existingItem.quantity += quantity;
     } else {
       cart.items.push({ product: productId, quantity, price: product.price });
     }
     await cart.save();
   }
 
-  // increment analytics
   await trackAddToCart(productId);
 
-  res.status(200).json(new ApiResponse(200, cart, "Added to cart successfully"));
+  // populate before sending response
+  const populated = await Cart.findById(cart._id).populate("items.product", POPULATE_FIELDS);
+  res.status(200).json(new ApiResponse(200, populated, "Added to cart successfully"));
 });
 
 // REMOVE ITEM FROM CART
@@ -63,10 +65,11 @@ export const removeFromCart = asynchandler(async (req, res) => {
   cart.items = cart.items.filter((i) => i.product.toString() !== productId);
   await cart.save();
 
-  res.status(200).json(new ApiResponse(200, cart, "Item removed from cart"));
+  const populated = await Cart.findById(cart._id).populate("items.product", POPULATE_FIELDS);
+  res.status(200).json(new ApiResponse(200, populated, "Item removed from cart"));
 });
 
-// CLEAR CART (called after order placed)
+// CLEAR CART
 export const clearCart = asynchandler(async (req, res) => {
   await Cart.findOneAndDelete({ user: req.user._id });
   res.status(200).json(new ApiResponse(200, {}, "Cart cleared"));
@@ -87,5 +90,6 @@ export const updateQuantity = asynchandler(async (req, res) => {
   item.quantity = quantity;
   await cart.save();
 
-  res.status(200).json(new ApiResponse(200, cart, "Quantity updated"));
+  const populated = await Cart.findById(cart._id).populate("items.product", POPULATE_FIELDS);
+  res.status(200).json(new ApiResponse(200, populated, "Quantity updated"));
 });
