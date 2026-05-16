@@ -36,23 +36,21 @@ const issueTokens = async (user, res) => {
   const accessToken  = user.generateAccessToken();
   const refreshToken = user.generateRefreshToken();
 
-
-  // push refresh token into tokens array (multi device)
   user.tokens.push(refreshToken);
   await user.save({ validateBeforeSave: false });
 
   const cookieOptions = {
     httpOnly: true,
-    secure:   process.env.NODE_ENV === "production",
+    secure: true,
+    sameSite: "none",  // ← required for Netlify + Render cross-origin
   };
 
   res
-    .cookie("accessToken",  accessToken) 
-    .cookie("refreshToken", refreshToken);
+    .cookie("accessToken", accessToken, cookieOptions)   // ← add options
+    .cookie("refreshToken", refreshToken, cookieOptions); // ← add options
 
   return { accessToken, refreshToken };
 };
-
 
 
 // ─── REGISTER ────────────────────────────────────────────────────────────────
