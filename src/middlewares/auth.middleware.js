@@ -13,7 +13,7 @@ export const protect = asynchandler(async (req, res, next) => {
     throw new ApiError(401, "Not authorized, no token");
   }
 
-  const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SCERET);
+  const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);  // ✅ fixed
 
   const user = await User.findById(decoded._id).select("-password -tokens -otp -otpExpiry");
 
@@ -37,9 +37,7 @@ export const restrictTo = (...roles) => {
 };
 
 // ─── IS ADMIN ───────────────────────────────────────────────
-// shorthand middleware for admin + superadmin routes
 export const isAdmin = restrictTo("admin", "superadmin");
 
 // ─── IS SUPER ADMIN ─────────────────────────────────────────
-// shorthand middleware for superadmin only routes
 export const isSuperAdmin = restrictTo("superadmin");

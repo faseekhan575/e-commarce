@@ -46,9 +46,10 @@ const userSchema = new Schema({
     type: [String],
     default: [],
   },
-   isVerified: {
+
+  isVerified: {
     type: Boolean,
-    default: false,  // becomes true after OTP verified on first login
+    default: false,
   },
 
   otp: {
@@ -65,18 +66,18 @@ const userSchema = new Schema({
 
 
 userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return ;
+  if (!this.isModified("password")) return;
   this.password = await bycrpt.hash(this.password, 10);
 });
 
-userSchema.methods.isPasswordCorrect = async function (enteredpassward) { 
+userSchema.methods.isPasswordCorrect = async function (enteredpassward) {
   return await bycrpt.compare(enteredpassward, this.password);
 };
 
 userSchema.methods.generateAccessToken = function () {
   return jwt.sign(
     { _id: this._id, role: this.role, email: this.email },
-    process.env.ACCESS_TOKEN_SCERET,
+    process.env.ACCESS_TOKEN_SECRET,   // ✅ fixed
     { expiresIn: process.env.ACCESS_TOKEN_EXPIRY }
   );
 };
@@ -84,8 +85,8 @@ userSchema.methods.generateAccessToken = function () {
 userSchema.methods.generateRefreshToken = function () {
   return jwt.sign(
     { _id: this._id },
-    process.env.REFRESH_TOKEN_SECERT,
-    { expiresIn: process.env.REFRESH_TOKEN_EXPIRY }  
+    process.env.REFRESH_TOKEN_SECRET,  // ✅ fixed
+    { expiresIn: process.env.REFRESH_TOKEN_EXPIRY }
   );
 };
 
