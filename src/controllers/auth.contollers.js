@@ -4,16 +4,14 @@ import { ApiError } from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import nodemailer from "nodemailer";
 
-// ─── helper: generate 6 digit OTP ───────────────────────────────────────────
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
-// ─── helper: send OTP email ──────────────────────────────────────────────────
 const sendOTPEmail = async (email, otp) => {
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS, // gmail app password not your real password
+      pass: process.env.EMAIL_PASS,
     },
   });
 
@@ -30,8 +28,6 @@ const sendOTPEmail = async (email, otp) => {
   });
 };
 
-
-// ─── helper: issue tokens and set cookies ───────────────────────────────────
 const issueTokens = async (user, res) => {
   const accessToken  = user.generateAccessToken();
   const refreshToken = user.generateRefreshToken();
@@ -42,21 +38,20 @@ const issueTokens = async (user, res) => {
   const cookieOptions = {
     httpOnly: true,
     secure: true,
-    sameSite: "none",  // ← required for Netlify + Render cross-origin
+    sameSite: "none",
   };
 
   res
-    .cookie("accessToken", accessToken, cookieOptions)   // ← add options
-    .cookie("refreshToken", refreshToken, cookieOptions); // ← add options
+    .cookie("accessToken", accessToken, cookieOptions)
+    .cookie("refreshToken", refreshToken, cookieOptions);
 
   return { accessToken, refreshToken };
 };
 
-
-// ─── REGISTER ────────────────────────────────────────────────────────────────
-// POST /api/auth/register
-
 export const register = asynchandler(async (req, res) => {
+  console.log("EMAIL_USER:", process.env.EMAIL_USER);
+  console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "SET" : "NOT SET");
+
   const { username, email, fullname, password } = req.body;
 
   if (!username || !email || !fullname || !password) {
@@ -69,7 +64,7 @@ export const register = asynchandler(async (req, res) => {
   }
 
   const otp       = generateOTP();
-  const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+  const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
 
   const user = await User.create({
     username,
@@ -81,37 +76,28 @@ export const register = asynchandler(async (req, res) => {
     isVerified: false,
   });
 
-  await sendOTPEmail(email, otp);
+  try {
+    await sendOTPEmail(email, otp);
+  } catch (err) {
+    console.error("Email send error:", err.message);
+    await User.findByIdAndDelete(user._id); // rollback user creation
+    throw new ApiError(500, "Failed to send OTP email: " + err.message);
+  }
 
   res.status(201).json(
     new ApiResponse(201, {}, "OTP sent to your email. Please verify to activate your account")
   );
 });
 
-// ─── VERIFY OTP (first time) ─────────────────────────────────────────────────
-// POST /api/auth/verify-otp
-
 export const verifyOTP = asynchandler(async (req, res) => {
   const { email, otp } = req.body;
 
   const user = await User.findOne({ email });
-  if (!user) {
-    throw new ApiError(404, "User not found");
-  }
+  if (!user) throw new ApiError(404, "User not found");
+  if (user.isVerified) throw new ApiError(400, "User already verified");
+  if (user.otp !== otp) throw new ApiError(400, "Invalid OTP");
+  if (user.otpExpiry < new Date()) throw new ApiError(400, "OTP has expired. Please request a new one");
 
-  if (user.isVerified) {
-    throw new ApiError(400, "User already verified");
-  }
-
-  if (user.otp !== otp) {
-    throw new ApiError(400, "Invalid OTP");
-  }
-
-  if (user.otpExpiry < new Date()) {
-    throw new ApiError(400, "OTP has expired. Please request a new one");
-  }
-
-  // clear otp and activate account
   user.isVerified = true;
   user.otp        = null;
   user.otpExpiry  = null;
@@ -124,57 +110,39 @@ export const verifyOTP = asynchandler(async (req, res) => {
   );
 });
 
-// ─── LOGIN ───────────────────────────────────────────────────────────────────
-// POST /api/auth/login
-
 export const login = asynchandler(async (req, res) => {
   const { email, password } = req.body;
 
-  if (!email || !password) {
-    throw new ApiError(400, "Email and password are required");
-  }
+  if (!email || !password) throw new ApiError(400, "Email and password are required");
 
   const user = await User.findOne({ email });
-  if (!user) {
-    throw new ApiError(404, "User not found");
-  }
-
-  if (!user.isVerified) {
-    throw new ApiError(403, "Please verify your email first");
-  }
+  if (!user) throw new ApiError(404, "User not found");
+  if (!user.isVerified) throw new ApiError(403, "Please verify your email first");
 
   const isPasswordCorrect = await user.isPasswordCorrect(password);
-  if (!isPasswordCorrect) {
-    throw new ApiError(401, "Invalid credentials");
-  }
+  if (!isPasswordCorrect) throw new ApiError(401, "Invalid credentials");
 
   const { accessToken, refreshToken } = await issueTokens(user, res);
 
- res.status(200).json(
+  res.status(200).json(
     new ApiResponse(200, {
-      _id:          user._id,        // ✅ added
+      _id:      user._id,
       accessToken,
       refreshToken,
-      role:         user.role,
-      email:        user.email,      // ✅ useful for frontend display
-      username:     user.username,   // ✅ useful for frontend display
-      fullname:     user.fullname,   // ✅ useful for frontend display
-      avatar:       user.avatar,     // ✅ useful for navbar profile pic
+      role:     user.role,
+      email:    user.email,
+      username: user.username,
+      fullname: user.fullname,
+      avatar:   user.avatar,
     }, "Logged in successfully")
   );
-
 });
-
-// ─── FORGOT PASSWORD: send OTP ───────────────────────────────────────────────
-// POST /api/auth/forgot-password
 
 export const forgotPassword = asynchandler(async (req, res) => {
   const { email } = req.body;
 
   const user = await User.findOne({ email });
-  if (!user) {
-    throw new ApiError(404, "User not found");
-  }
+  if (!user) throw new ApiError(404, "User not found");
 
   const otp       = generateOTP();
   const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
@@ -183,33 +151,26 @@ export const forgotPassword = asynchandler(async (req, res) => {
   user.otpExpiry = otpExpiry;
   await user.save({ validateBeforeSave: false });
 
-  await sendOTPEmail(email, otp);
+  try {
+    await sendOTPEmail(email, otp);
+  } catch (err) {
+    console.error("Email send error:", err.message);
+    throw new ApiError(500, "Failed to send OTP email: " + err.message);
+  }
 
   res.status(200).json(
     new ApiResponse(200, {}, "OTP sent to your email for password reset")
   );
 });
 
-// ─── VERIFY OTP FOR RESET PASSWORD ──────────────────────────────────────────
-// POST /api/auth/verify-reset-otp
-
 export const verifyResetOTP = asynchandler(async (req, res) => {
   const { email, otp } = req.body;
 
   const user = await User.findOne({ email });
-  if (!user) {
-    throw new ApiError(404, "User not found");
-  }
+  if (!user) throw new ApiError(404, "User not found");
+  if (user.otp !== otp) throw new ApiError(400, "Invalid OTP");
+  if (user.otpExpiry < new Date()) throw new ApiError(400, "OTP has expired. Please request a new one.");
 
-  if (user.otp !== otp) {
-    throw new ApiError(400, "Invalid OTP");
-  }
-
-  if (user.otpExpiry < new Date()) {
-    throw new ApiError(400, "OTP has expired. Please request a new one.");
-  }
-
-  // clear otp — frontend now shows reset password form
   user.otp       = null;
   user.otpExpiry = null;
   await user.save({ validateBeforeSave: false });
@@ -219,29 +180,21 @@ export const verifyResetOTP = asynchandler(async (req, res) => {
   );
 });
 
-// ─── RESET PASSWORD ────────────────────────────────────────────
-// POST /api/auth/reset-password
 export const resetPassword = asynchandler(async (req, res) => {
-  const { email, otp, newPassword } = req.body; // 👈 add otp here
+  const { email, otp, newPassword } = req.body;
 
   const user = await User.findOne({ email });
   if (!user) throw new ApiError(404, "User not found");
-
-  // verify otp here instead of separate endpoint
   if (user.otp !== otp) throw new ApiError(400, "Invalid OTP");
   if (user.otpExpiry < new Date()) throw new ApiError(400, "OTP expired");
 
-  // clear otp + set new password
-  user.otp = null;
+  user.otp      = null;
   user.otpExpiry = null;
-  user.password = newPassword;
+  user.password  = newPassword;
   await user.save();
 
   res.status(200).json(new ApiResponse(200, {}, "Password reset successfully"));
 });
-
-// ─── LOGOUT ──────────────────────────────────────────────────────────────────
-// POST /api/auth/logout
 
 export const logout = asynchandler(async (req, res) => {
   const token = req.cookies?.refreshToken;
