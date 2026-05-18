@@ -2,27 +2,15 @@ import { asynchandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.models.js";
 import { ApiError } from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 const sendOTPEmail = async (email, otp) => {
- const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  requireTLS: true,        // ← add this
-  connectionTimeout: 10000, // ← 10 seconds
-  greetingTimeout: 10000,
-  socketTimeout: 10000,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-  await transporter.sendMail({
-    from: process.env.EMAIL_USER,
+  await resend.emails.send({
+    from: "onboarding@resend.dev",
     to: email,
     subject: "Your OTP Code",
     html: `
@@ -55,9 +43,6 @@ const issueTokens = async (user, res) => {
 };
 
 export const register = asynchandler(async (req, res) => {
-  console.log("EMAIL_USER:", process.env.EMAIL_USER);
-  console.log("EMAIL_PASS:", process.env.EMAIL_PASS ? "SET" : "NOT SET");
-
   const { username, email, fullname, password } = req.body;
 
   if (!username || !email || !fullname || !password) {
@@ -86,7 +71,7 @@ export const register = asynchandler(async (req, res) => {
     await sendOTPEmail(email, otp);
   } catch (err) {
     console.error("Email send error:", err.message);
-    await User.findByIdAndDelete(user._id); // rollback user creation
+    await User.findByIdAndDelete(user._id);
     throw new ApiError(500, "Failed to send OTP email: " + err.message);
   }
 
@@ -194,7 +179,7 @@ export const resetPassword = asynchandler(async (req, res) => {
   if (user.otp !== otp) throw new ApiError(400, "Invalid OTP");
   if (user.otpExpiry < new Date()) throw new ApiError(400, "OTP expired");
 
-  user.otp      = null;
+  user.otp       = null;
   user.otpExpiry = null;
   user.password  = newPassword;
   await user.save();
