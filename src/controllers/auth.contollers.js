@@ -7,15 +7,19 @@ import nodemailer from "nodemailer";
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 const sendOTPEmail = async (email, otp) => {
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",  // ← changed
-    port: 587,               // ← changed
-    secure: false,           // ← changed
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
+ const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
+  requireTLS: true,        // ← add this
+  connectionTimeout: 10000, // ← 10 seconds
+  greetingTimeout: 10000,
+  socketTimeout: 10000,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
   await transporter.sendMail({
     from: process.env.EMAIL_USER,
