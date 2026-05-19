@@ -2,12 +2,17 @@ import { asynchandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.models.js";
 import { ApiError } from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import nodemailer from "nodemailer";
 import { google } from "googleapis";
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 const sendOTPEmail = async (email, otp) => {
+  console.log("📧 Sending OTP to:", email);
+  console.log("🔑 CLIENT_ID:", process.env.GMAIL_CLIENT_ID ? "SET" : "MISSING");
+  console.log("🔑 CLIENT_SECRET:", process.env.GMAIL_CLIENT_SECRET ? "SET" : "MISSING");
+  console.log("🔑 REFRESH_TOKEN:", process.env.GMAIL_REFRESH_TOKEN ? "SET" : "MISSING");
+  console.log("🔑 EMAIL_USER:", process.env.EMAIL_USER);
+
   const oauth2Client = new google.auth.OAuth2(
     process.env.GMAIL_CLIENT_ID,
     process.env.GMAIL_CLIENT_SECRET,
@@ -16,33 +21,37 @@ const sendOTPEmail = async (email, otp) => {
 
   oauth2Client.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
 
+  console.log("🔄 Getting access token...");
   const { token: accessToken } = await oauth2Client.getAccessToken();
+  console.log("✅ Access token received:", accessToken ? "YES" : "NO");
 
-  const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
-  auth: {
-    type: "OAuth2",
-    user: process.env.EMAIL_USER,
-    clientId: process.env.GMAIL_CLIENT_ID,
-    clientSecret: process.env.GMAIL_CLIENT_SECRET,
-    refreshToken: process.env.GMAIL_REFRESH_TOKEN,
-    accessToken,
-  },
-});
+  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
-  await transporter.sendMail({
-    from: `Vault <${process.env.EMAIL_USER}>`,
-    to: email,
-    subject: "Your OTP Code",
-    html: `
-      <h2>Your OTP Code</h2>
-      <p>Use this code to verify your account:</p>
-      <h1>${otp}</h1>
-      <p>This code expires in 10 minutes.</p>
-    `,
+  const message = [
+    `To: ${email}`,
+    `From: Vault <${process.env.EMAIL_USER}>`,
+    `Subject: Your OTP Code`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset=utf-8`,
+    ``,
+    `<h2>Your OTP Code</h2>
+     <p>Use this code to verify your account:</p>
+     <h1>${otp}</h1>
+     <p>This code expires in 10 minutes.</p>`,
+  ].join("\n");
+
+  const encodedMessage = Buffer.from(message)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  console.log("📤 Sending via Gmail API...");
+  const result = await gmail.users.messages.send({
+    userId: "me",
+    requestBody: { raw: encodedMessage },
   });
+  console.log("✅ Email sent! Message ID:", result.data.id);
 };
 
 const issueTokens = async (user, res) => {
@@ -93,7 +102,8 @@ export const register = asynchandler(async (req, res) => {
   try {
     await sendOTPEmail(email, otp);
   } catch (err) {
-    console.error("Email send error:", err.message);
+    console.error("❌ Email send error:", err.message);
+    console.error("❌ Full error:", err);
     await User.findByIdAndDelete(user._id);
     throw new ApiError(500, "Failed to send OTP email: " + err.message);
   }
@@ -168,7 +178,8 @@ export const forgotPassword = asynchandler(async (req, res) => {
   try {
     await sendOTPEmail(email, otp);
   } catch (err) {
-    console.error("Email send error:", err.message);
+    console.error("❌ Email send error:", err.message);
+    console.error("❌ Full error:", err);
     throw new ApiError(500, "Failed to send OTP email: " + err.message);
   }
 
