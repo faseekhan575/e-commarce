@@ -1,3 +1,4 @@
+import { getIO } from "../socket.js";
 import { asynchandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.models.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -221,12 +222,256 @@ export const resetPassword = asynchandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, {}, "Password reset successfully"));
 });
 
+// ============================================================
+// GOOGLE OAUTH LOGIN / SIGN-IN (POPUP & REDIRECT FLOWS)
+// ============================================================
+
+const getOAuth2Client = (redirectUri) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID || process.env.GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.GMAIL_CLIENT_SECRET;
+  const callbackUrl =
+    redirectUri ||
+    `http://localhost:${process.env.PORT || 4000}/api/v1/auth/google/callback`;
+
+  return new google.auth.OAuth2(clientId, clientSecret, callbackUrl);
+};
+
+/**
+ * 1. Direct Browser Redirect to Google Account Selector
+ * URL: GET /api/v1/auth/google/redirect
+ */
+export const redirectToGoogle = (req, res) => {
+  const oauth2Client = getOAuth2Client();
+  const authUrl = oauth2Client.generateAuthUrl({
+    access_type: "offline",
+    scope: [
+      "https://www.googleapis.com/auth/userinfo.profile",
+      "https://www.googleapis.com/auth/userinfo.email",
+    ],
+    prompt: "select_account", // Always prompt user to pick Google account
+  });
+
+  return res.redirect(authUrl);
+};
+
+/**
+ * 2. Google OAuth Callback Handler
+ * URL: GET /api/v1/auth/google/callback
+ */
+export const googleOAuthCallback = asynchandler(async (req, res) => {
+  const { code } = req.query;
+
+  if (!code) {
+    throw new ApiError(400, "Google authorization code is missing");
+  }
+
+  const oauth2Client = getOAuth2Client();
+  const { tokens } = await oauth2Client.getToken(code);
+  oauth2Client.setCredentials(tokens);
+
+  const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
+  const { data: profile } = await oauth2.userinfo.get();
+
+  const email = profile.email?.toLowerCase().trim();
+  const fullname = profile.name;
+  const avatarUrl = profile.picture;
+  const googleId = profile.id;
+
+  if (!email) {
+    throw new ApiError(400, "Google account did not return a valid email address");
+  }
+
+  let user = await User.findOne({
+    $or: [
+      { googleId: googleId || "non_existent_id" },
+      { email },
+    ],
+  });
+
+  if (user) {
+    if (!user.googleId && googleId) user.googleId = googleId;
+    if (!user.avatar?.url && avatarUrl) user.avatar = { url: avatarUrl, public_id: "" };
+    user.isVerified = true;
+    if (user.authProvider !== "google" && !user.password) {
+      user.authProvider = "google";
+    }
+    await user.save({ validateBeforeSave: false });
+  } else {
+    const baseUsername = email.split("@")[0].replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    let uniqueUsername = baseUsername;
+    let counter = 1;
+
+    while (await User.findOne({ username: uniqueUsername })) {
+      uniqueUsername = `${baseUsername}${Math.floor(100 + Math.random() * 900)}${counter}`;
+      counter++;
+    }
+
+    user = await User.create({
+      fullname: fullname ? fullname.trim() : baseUsername,
+      username: uniqueUsername,
+      email,
+      googleId: googleId || `google_${Date.now()}`,
+      authProvider: "google",
+      avatar: avatarUrl ? { url: avatarUrl, public_id: "" } : { url: "", public_id: "" },
+      isVerified: true,
+    });
+  }
+
+  const { accessToken } = await issueTokens(user, res);
+
+  const frontendUrl =
+    process.env.CORS_ORIGIN ||
+    process.env.CROS_ORIGIN ||
+    "http://localhost:5173";
+
+  const targetUrl = `${frontendUrl.replace(/\/+$/, "")}/?login=success&token=${accessToken}&userId=${user._id}&role=${user.role}`;
+  return res.redirect(targetUrl);
+});
+
+/**
+ * 3. JSON API for React Popup (@react-oauth/google / One-Tap)
+ * URL: POST /api/v1/auth/google
+ */
+export const googleLogin = asynchandler(async (req, res) => {
+  const { idToken, credential, accessToken: googleAccessToken, email: rawEmail, fullname: rawName, avatar: rawAvatar, googleId: rawGoogleId } = req.body;
+
+  let email = rawEmail;
+  let fullname = rawName;
+  let avatarUrl = rawAvatar;
+  let googleId = rawGoogleId;
+
+  const tokenToVerify = idToken || credential;
+
+  // If Google ID Token / credential was provided, verify with Google API
+  if (tokenToVerify) {
+    try {
+      const clientId = process.env.GOOGLE_CLIENT_ID || process.env.GMAIL_CLIENT_ID;
+      const oauth2Client = new google.auth.OAuth2(clientId);
+
+      const ticket = await oauth2Client.verifyIdToken({
+        idToken: tokenToVerify,
+        audience: clientId ? [clientId] : undefined,
+      });
+
+      const payload = ticket.getPayload();
+      if (payload) {
+        email = payload.email;
+        fullname = payload.name || fullname;
+        avatarUrl = payload.picture || avatarUrl;
+        googleId = payload.sub || googleId;
+      }
+    } catch (verifyErr) {
+      console.warn("⚠️ Local Google verifyIdToken fallback to tokeninfo:", verifyErr.message);
+
+      // Fallback: verify via Google tokeninfo endpoint
+      try {
+        const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${tokenToVerify}`);
+        const tokenInfo = await response.json();
+
+        if (tokenInfo && tokenInfo.email) {
+          email = tokenInfo.email;
+          fullname = tokenInfo.name || fullname;
+          avatarUrl = tokenInfo.picture || avatarUrl;
+          googleId = tokenInfo.sub || googleId;
+        } else {
+          throw new ApiError(401, "Invalid Google ID token");
+        }
+      } catch (fetchErr) {
+        throw new ApiError(401, "Google token verification failed: " + fetchErr.message);
+      }
+    }
+  }
+
+  if (!email) {
+    throw new ApiError(400, "Google authentication did not provide a valid email");
+  }
+
+  email = email.toLowerCase().trim();
+
+  // Find user by googleId or by email
+  let user = await User.findOne({
+    $or: [
+      { googleId: googleId || "non_existent_id" },
+      { email },
+    ],
+  });
+
+  if (user) {
+    // Link googleId and mark verified if not already
+    if (!user.googleId && googleId) {
+      user.googleId = googleId;
+    }
+    if (!user.avatar?.url && avatarUrl) {
+      user.avatar = { url: avatarUrl, public_id: "" };
+    }
+    user.isVerified = true;
+    if (user.authProvider !== "google" && !user.password) {
+      user.authProvider = "google";
+    }
+    await user.save({ validateBeforeSave: false });
+  } else {
+    // Generate clean unique username
+    const baseUsername = email.split("@")[0].replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    let uniqueUsername = baseUsername;
+    let counter = 1;
+
+    while (await User.findOne({ username: uniqueUsername })) {
+      uniqueUsername = `${baseUsername}${Math.floor(100 + Math.random() * 900)}${counter}`;
+      counter++;
+    }
+
+    user = await User.create({
+      fullname: fullname ? fullname.trim() : baseUsername,
+      username: uniqueUsername,
+      email,
+      googleId: googleId || `google_${Date.now()}`,
+      authProvider: "google",
+      avatar: avatarUrl ? { url: avatarUrl, public_id: "" } : { url: "", public_id: "" },
+      isVerified: true,
+    });
+  }
+
+  const { accessToken, refreshToken } = await issueTokens(user, res);
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        _id: user._id,
+        accessToken,
+        refreshToken,
+        role: user.role,
+        email: user.email,
+        username: user.username,
+        fullname: user.fullname,
+        avatar: user.avatar,
+        authProvider: user.authProvider,
+      },
+      "Logged in with Google successfully"
+    )
+  );
+});
+
+
+export const getCurrentUser = asynchandler(async (req, res) => {
+  const user = await User.findById(req.user._id).select(
+    "-password -tokens -otp -otpExpiry"
+  );
+  if (!user) throw new ApiError(404, "User not found");
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, user, "Current user fetched successfully"));
+});
+
 export const logout = asynchandler(async (req, res) => {
   const token = req.cookies?.refreshToken;
 
-  await User.findByIdAndUpdate(req.user._id, {
-    $pull: { tokens: token },
-  });
+  if (req.user?._id) {
+    await User.findByIdAndUpdate(req.user._id, {
+      $pull: { tokens: token },
+    });
+  }
 
   const cookieOptions = { httpOnly: true, secure: true, sameSite: "none" };
 
@@ -236,3 +481,4 @@ export const logout = asynchandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, {}, "Logged out successfully"));
 });
+

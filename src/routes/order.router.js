@@ -3,63 +3,52 @@
 // ===========================================================
 
 import { Router } from "express";
-
 import {
   placeOrder,
   getMyOrders,
+  getOrderById,
+  cancelMyOrder,
   getAllOrders,
   updateOrderStatus,
   downloadOrdersCSV,
 } from "../controllers/order.controller.js";
-
-import {
-  protect,
-  isAdmin,
-} from "../middlewares/auth.middleware.js";
+import { protect, isAdmin } from "../middlewares/auth.middleware.js";
 
 const orderRouter = Router();
 
 // ===========================================================
-// USER ROUTES
+// USER / CUSTOMER ROUTES
 // ===========================================================
 
 // Place order
-orderRouter.route("/place").post(
-  protect,
-  placeOrder
-);
+orderRouter.route("/place").post(protect, placeOrder);
 
-// Get logged-in user orders
-orderRouter.route("/my").get(
-  protect,
-  getMyOrders
-);
+// Get logged-in user order history
+orderRouter.route("/my").get(protect, getMyOrders);
+
+// Cancel my pending order (restores product stock)
+orderRouter.route("/:orderid/cancel").patch(protect, cancelMyOrder);
 
 // ===========================================================
-// ADMIN ROUTES
+// ADMIN ROUTES (BEFORE generic :orderid)
 // ===========================================================
 
-// Get all orders
-orderRouter.route("/all").get(
-  protect,
-  isAdmin,
-  getAllOrders
-);
+// Get all orders (with search, status, and payment filters)
+orderRouter.route("/all").get(protect, isAdmin, getAllOrders);
 
-// Download CSV
-orderRouter.route("/download").get(
-  protect,
-  isAdmin,
-  downloadOrdersCSV
-);
+// Download CSV report
+orderRouter.route("/download").get(protect, isAdmin, downloadOrdersCSV);
 
-// Update order status
-// IMPORTANT:
-// KEEPING :orderid BECAUSE FRONTEND ALREADY USES IT
-orderRouter.route("/:orderid/status").patch(
-  protect,
-  isAdmin,
-  updateOrderStatus
-);
+// ===========================================================
+// PARAM ROUTES
+// ===========================================================
 
-export default orderRouter;
+// Get single order detail (user sees own, admin sees any)
+orderRouter.route("/:orderid").get(protect, getOrderById);
+
+// Update order status & payment status (admin)
+orderRouter
+  .route("/:orderid/status")
+  .patch(protect, isAdmin, updateOrderStatus);
+
+export default orderRouter;

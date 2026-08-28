@@ -27,10 +27,12 @@ const productSchema = new Schema({
   // images[0] = main image, rest = additional images added via + icon
   images: [
     {
-      url:       { type: String, default: "" },
-      public_id: { type: String, default: "" },
+      url:          { type: String, default: "" },
+      public_id:    { type: String, default: "" },
+      thumbnailUrl: { type: String, default: "" },
     }
   ],
+
 
   stock: {
     type: Number,
@@ -63,8 +65,21 @@ const productSchema = new Schema({
   isActive: {
     type: Boolean,
     default: true,
+    index: true,
+  },
+
+  isHot: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+
+  isFeatured: {
+    type: Boolean,
+    default: false,
+    index: true,
   },
 
 }, { timestamps: true });
 
-export const Product = mongoose.model("Product", productSchema);
+export const Product = mongoose.model("Product", productSchema);

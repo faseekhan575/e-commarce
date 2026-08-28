@@ -6,12 +6,10 @@ import { asynchandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { User } from "../models/user.models.js";
-import uploadImage from "../utils/cloudinary.js";
-import { v2 as cloudinary } from "cloudinary"; // ✅ FIX: import v2
+import uploadImage, { deleteImage } from "../utils/cloudinary.js";
 
 // GET MY PROFILE
 export const getProfile = asynchandler(async (req, res) => {
-  // ✅ FIX: guard against missing auth
   if (!req.user?._id) throw new ApiError(401, "Unauthorized");
 
   const user = await User.findById(req.user._id).select("-password -tokens -otp -otpExpiry");
@@ -52,12 +50,17 @@ export const updateAvatar = asynchandler(async (req, res) => {
   const user = await User.findById(req.user._id);
   if (!user) throw new ApiError(404, "User not found");
 
-  // ✅ FIX: cloudinary.v2 is now imported correctly, .destroy() will work
   if (user.avatar?.public_id) {
-    await cloudinary.uploader.destroy(user.avatar.public_id);
+    await deleteImage(user.avatar.public_id);
   }
 
-  const uploaded = await uploadImage(req.file.buffer);
+  const uploaded = await uploadImage(req.file.buffer, {
+    folder: "clothing_store/avatars",
+    transformation: [
+      { width: 300, height: 300, crop: "fill", gravity: "face", quality: "auto", fetch_format: "auto" }
+    ]
+  });
+
   if (!uploaded) throw new ApiError(500, "Failed to upload image");
 
   user.avatar = { url: uploaded.secure_url, public_id: uploaded.public_id };
@@ -95,9 +98,8 @@ export const deleteAccount = asynchandler(async (req, res) => {
   const user = await User.findById(req.user._id);
   if (!user) throw new ApiError(404, "User not found");
 
-  // ✅ FIX: cloudinary.v2 is now imported correctly
   if (user.avatar?.public_id) {
-    await cloudinary.uploader.destroy(user.avatar.public_id);
+    await deleteImage(user.avatar.public_id);
   }
 
   await User.findByIdAndDelete(req.user._id);
@@ -107,4 +109,4 @@ export const deleteAccount = asynchandler(async (req, res) => {
     .clearCookie("refreshToken")
     .status(200)
     .json(new ApiResponse(200, {}, "Account deleted successfully"));
-});
+});

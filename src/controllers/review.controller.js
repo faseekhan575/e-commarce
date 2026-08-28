@@ -1,55 +1,93 @@
+import { getIO } from "../socket.js";
 // ============================================================
 // review.controller.js
 // ============================================================
 
+import mongoose from "mongoose";
 import { asynchandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { Review } from "../models/review.model.js";
 import { Order } from "../models/orders.model.js";
-import uploadImage from "../utils/cloudinary.js";
-import cloudinary from "../utils/cloudinary.js";
+import {
+  uploadMultipleImages,
+  deleteMultipleImages,
+} from "../utils/cloudinary.js";
 
 // ============================================================
-// GET ALL REVIEWS FOR A PRODUCT (public)
+// GET ALL REVIEWS FOR A PRODUCT (PUBLIC)
 // ============================================================
-
 export const getProductReviews = asynchandler(async (req, res) => {
-  const reviews = await Review.find({
-    product: req.params.productid,
-  })
+  const { productid } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(productid)) {
+    throw new ApiError(400, "Invalid product ID format");
+  }
+
+  const reviews = await Review.find({ product: productid })
     .populate("user", "fullname avatar username")
     .sort({ createdAt: -1 });
 
-  res
+  return res
     .status(200)
     .json(
-      new ApiResponse(
-        200,
-        reviews,
-        "Reviews fetched successfully"
-      )
+      new ApiResponse(200, reviews, "Product reviews fetched successfully")
     );
 });
 
 // ============================================================
-// ADD REVIEW (user — only if purchased)
+// GET ALL REVIEWS ACROSS STORE (ADMIN ONLY - MODERATION)
 // ============================================================
+export const getAllReviews = asynchandler(async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.max(1, parseInt(req.query.limit) || 15);
+  const skip = (page - 1) * limit;
 
+  const [reviews, total] = await Promise.all([
+    Review.find()
+      .populate("user", "fullname email username avatar")
+      .populate("product", "title images price")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    Review.countDocuments(),
+  ]);
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        reviews,
+        total,
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+      },
+      "All reviews fetched successfully"
+    )
+  );
+});
+
+// ============================================================
+// ADD REVIEW (CUSTOMER - verified purchase check)
+// ============================================================
 export const addReview = asynchandler(async (req, res) => {
-  // IMPORTANT FIX
   const { productid } = req.params;
-
   const { rating, comment } = req.body;
 
-  if (!rating || !comment) {
-    throw new ApiError(
-      400,
-      "Rating and comment are required"
-    );
+  if (!mongoose.Types.ObjectId.isValid(productid)) {
+    throw new ApiError(400, "Invalid product ID format");
   }
 
-  // check if user actually purchased this product
+  if (!rating || !comment) {
+    throw new ApiError(400, "Rating (1-5) and comment are required");
+  }
+
+  const numRating = Number(rating);
+  if (numRating < 1 || numRating > 5) {
+    throw new ApiError(400, "Rating must be between 1 and 5");
+  }
+
+  // Check if customer has purchased and received this product
   const hasPurchased = await Order.findOne({
     user: req.user._id,
     "items.product": productid,
@@ -59,104 +97,77 @@ export const addReview = asynchandler(async (req, res) => {
   if (!hasPurchased) {
     throw new ApiError(
       403,
-      "You can only review products you have purchased and received"
+      "You can only review products that have been delivered to you"
     );
   }
 
-  // check if already reviewed
+  // Check if already reviewed
   const existing = await Review.findOne({
     user: req.user._id,
     product: productid,
   });
 
   if (existing) {
-    throw new ApiError(
-      409,
-      "You have already reviewed this product"
-    );
+    throw new ApiError(409, "You have already reviewed this product");
   }
 
-  // upload review images if any
+  // Upload review images if any
   let images = [];
-
   if (req.files && req.files.length > 0) {
-    const uploads = await Promise.all(
-      req.files.map((file) =>
-        uploadImage(file.buffer)
-      )
-    );
-
-    images = uploads.map((upload) => ({
-      url: upload.secure_url,
-      public_id: upload.public_id,
-    }));
+    images = await uploadMultipleImages(req.files, {
+      folder: "clothing_store/reviews",
+    });
   }
 
-  // create review
   const review = await Review.create({
     user: req.user._id,
     product: productid,
-    rating,
-    comment,
+    rating: numRating,
+    comment: comment.trim(),
     images,
   });
 
-  res
+  const populated = await Review.findById(review._id).populate(
+    "user",
+    "fullname avatar username"
+  );
+
+  return res
     .status(201)
-    .json(
-      new ApiResponse(
-        201,
-        review,
-        "Review added successfully"
-      )
-    );
+    .json(new ApiResponse(201, populated, "Review submitted successfully"));
 });
 
 // ============================================================
-// DELETE REVIEW (user deletes own, admin deletes any)
+// DELETE REVIEW (User deletes own, Admin can delete any)
 // ============================================================
-
 export const deleteReview = asynchandler(async (req, res) => {
-  // IMPORTANT FIX
-  const review = await Review.findById(
-    req.params.reviewid
-  );
+  const { reviewid } = req.params;
 
+  if (!mongoose.Types.ObjectId.isValid(reviewid)) {
+    throw new ApiError(400, "Invalid review ID format");
+  }
+
+  const review = await Review.findById(reviewid);
   if (!review) {
     throw new ApiError(404, "Review not found");
   }
 
-  // user can only delete their own review
+  // User can only delete own review unless admin
   if (
     review.user.toString() !== req.user._id.toString() &&
-    req.user.role === "user"
+    req.user.role !== "admin"
   ) {
-    throw new ApiError(
-      403,
-      "You can only delete your own review"
-    );
+    throw new ApiError(403, "You do not have permission to delete this review");
   }
 
-  // delete review images from cloudinary
-  if (review.images?.length > 0) {
-    await Promise.all(
-      review.images.map((img) =>
-        cloudinary.uploader.destroy(img.public_id)
-      )
-    );
+  // Delete review images from Cloudinary
+  if (review.images && review.images.length > 0) {
+    await deleteMultipleImages(review.images.map((img) => img.public_id));
   }
 
-  await Review.findByIdAndDelete(
-    req.params.reviewid
-  );
+  await Review.findByIdAndDelete(reviewid);
 
-  res
+  return res
     .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        {},
-        "Review deleted successfully"
-      )
-    );
+    .json(new ApiResponse(200, {}, "Review deleted successfully"));
 });

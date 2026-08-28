@@ -10,34 +10,32 @@ export const protect = asynchandler(async (req, res, next) => {
     req.header("Authorization")?.replace("Bearer ", "");
 
   if (!token) {
-    throw new ApiError(401, "Not authorized, no token");
+    throw new ApiError(401, "Not authorized, no token provided");
   }
 
-  const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);  // ✅ fixed
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+  } catch (err) {
+    throw new ApiError(401, "Invalid or expired access token");
+  }
 
-  const user = await User.findById(decoded._id).select("-password -tokens -otp -otpExpiry");
+  const user = await User.findById(decoded._id).select(
+    "-password -tokens -otp -otpExpiry"
+  );
 
   if (!user) {
-    throw new ApiError(401, "User not found");
+    throw new ApiError(401, "User no longer exists");
   }
 
   req.user = user;
   next();
 });
 
-// ─── RESTRICT TO ROLES ──────────────────────────────────────
-// usage: restrictTo("admin", "superadmin")
-export const restrictTo = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      throw new ApiError(403, `Access denied. Only ${roles.join(", ")} can do this`);
-    }
-    next();
-  };
-};
-
 // ─── IS ADMIN ───────────────────────────────────────────────
-export const isAdmin = restrictTo("admin", "superadmin");
-
-// ─── IS SUPER ADMIN ─────────────────────────────────────────
-export const isSuperAdmin = restrictTo("superadmin");
+export const isAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== "admin") {
+    throw new ApiError(403, "Access denied. Admin privileges required");
+  }
+  next();
+};

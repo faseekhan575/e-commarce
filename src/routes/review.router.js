@@ -3,48 +3,37 @@
 // ============================================================
 
 import { Router } from "express";
-
 import {
   getProductReviews,
+  getAllReviews,
   addReview,
   deleteReview,
 } from "../controllers/review.controller.js";
-
-import { protect } from "../middlewares/auth.middleware.js";
-
+import { protect, isAdmin } from "../middlewares/auth.middleware.js";
 import { upload } from "../middlewares/multer.middleware.js";
 
 const reviewRouter = Router();
 
 // ============================================================
-// GET PRODUCT REVIEWS
+// ADMIN ROUTES (BEFORE :productid)
 // ============================================================
 
-reviewRouter
-  .route("/:productid")
-  .get(getProductReviews);
+// Moderate all reviews across store
+reviewRouter.route("/admin/all").get(protect, isAdmin, getAllReviews);
 
 // ============================================================
-// ADD REVIEW
+// PUBLIC & USER ROUTES
 // ============================================================
 
+// Get product reviews
+reviewRouter.route("/:productid").get(getProductReviews);
+
+// Add review (verified customer)
 reviewRouter
   .route("/:productid/add")
-  .post(
-    protect,
-    upload.array("images", 3),
-    addReview
-  );
+  .post(protect, upload.array("images", 3), addReview);
 
-// ============================================================
-// DELETE REVIEW
-// ============================================================
+// Delete review (user own review / admin any review)
+reviewRouter.route("/:reviewid/delete").delete(protect, deleteReview);
 
-reviewRouter
-  .route("/:reviewid/delete")
-  .delete(
-    protect,
-    deleteReview
-  );
-
-export default reviewRouter;
+export default reviewRouter;

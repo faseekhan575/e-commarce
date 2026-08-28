@@ -18,9 +18,11 @@ const categorySchema = new Schema({
   },
 
   image: {
-    url:       { type: String, default: "" },
-    public_id: { type: String, default: "" },
+    url:          { type: String, default: "" },
+    public_id:    { type: String, default: "" },
+    thumbnailUrl: { type: String, default: "" },
   },
+
 
   createdBy: {
     type: Schema.Types.ObjectId,
@@ -28,6 +30,18 @@ const categorySchema = new Schema({
     required: true,
   },
 
+  isHot: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+
+  isFeatured: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+
 }, { timestamps: true });
 
-export const Category = mongoose.model("Category", categorySchema);
+export const Category = mongoose.model("Category", categorySchema);
