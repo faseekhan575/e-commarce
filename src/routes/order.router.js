@@ -1,7 +1,3 @@
-// ===========================================================
-// order.router.js
-// ===========================================================
-
 import { Router } from "express";
 import {
   placeOrder,
@@ -10,6 +6,7 @@ import {
   cancelMyOrder,
   getAllOrders,
   updateOrderStatus,
+  updateOrderTracking,
   downloadOrdersCSV,
 } from "../controllers/order.controller.js";
 import { protect, isAdmin } from "../middlewares/auth.middleware.js";
@@ -51,4 +48,10 @@ orderRouter
   .route("/:orderid/status")
   .patch(protect, isAdmin, updateOrderStatus);
 
-export default orderRouter;
+// Update courier tracking & dispatch details (admin)
+orderRouter
+  .route("/:orderid/tracking")
+  .patch(protect, isAdmin, updateOrderTracking);
+
+export default orderRouter;
+

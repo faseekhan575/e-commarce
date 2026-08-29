@@ -24,6 +24,7 @@ import reviewRouter from "./routes/review.router.js";
 import adminRouter from "./routes/admin.router.js";
 import dashboardRouter from "./routes/dashboard.router.js";
 import bannerRouter from "./routes/banner.router.js";
+import spotlightRouter from "./routes/spotlight.router.js";
 
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v2/user", userRouter);
@@ -33,10 +34,11 @@ app.use("/api/v5/cart", cartRouter);
 app.use("/api/v6/order", orderRouter);
 app.use("/api/v7/review", reviewRouter);
 app.use("/api/v8/admin", adminRouter);
-app.use("/api/v8/superadmin", adminRouter); // backward-compatible alias
 app.use("/api/v9/dashboard", dashboardRouter);
 app.use("/api/v10/banner", bannerRouter);
-app.use("/api/v10/banners", bannerRouter); // plural alias
+app.use("/api/v11/spotlight", spotlightRouter);
+
+
 
 
 // ── HEALTH CHECK ROUTE ─────────────────────────────────────────

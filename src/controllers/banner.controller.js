@@ -128,38 +128,50 @@ export const createBanner = asynchandler(async (req, res) => {
     isActive,
   } = req.body;
 
-  if (!title) {
-    throw new ApiError(400, "Banner title is required");
-  }
+  const bannerTitle = (title && title.trim()) || "Luxury Campaign";
 
-  if (!req.file) {
-    throw new ApiError(400, "Banner background image is required");
-  }
+  let image = {
+    url: "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1920&q=80",
+    public_id: "",
+    thumbnailUrl:
+      "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=400&q=80",
+    bannerOptimizedUrl:
+      "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1920&q=80",
+  };
 
-  // Upload with automatic ultra-wide banner transformation
-  const uploaded = await uploadBannerImage(req.file.buffer, {
-    folder: "clothing_store/banners",
-  });
-
-  if (!uploaded) {
-    throw new ApiError(500, "Failed to process and upload banner image to Cloudinary");
+  if (req.file) {
+    const uploaded = await uploadBannerImage(req.file.buffer, {
+      folder: "clothing_store/banners",
+    });
+    if (uploaded) {
+      image = {
+        url: uploaded.secure_url,
+        public_id: uploaded.public_id,
+        thumbnailUrl: uploaded.thumbnailUrl || uploaded.secure_url,
+        bannerOptimizedUrl: uploaded.bannerOptimizedUrl || uploaded.secure_url,
+      };
+    }
+  } else if (req.body.imageUrl && req.body.imageUrl.trim()) {
+    const url = req.body.imageUrl.trim();
+    image = {
+      url,
+      public_id: "",
+      thumbnailUrl: url,
+      bannerOptimizedUrl: url,
+    };
   }
 
   const banner = await Banner.create({
-    title: title.trim(),
+    title: bannerTitle,
     subtitle: subtitle ? subtitle.trim() : "",
     badge: badge ? badge.trim().toUpperCase() : "NEW ARRIVALS",
     collectionType: collectionType || "featured_hero",
-    image: {
-      url: uploaded.secure_url,
-      public_id: uploaded.public_id,
-      thumbnailUrl: uploaded.thumbnailUrl || uploaded.secure_url,
-      bannerOptimizedUrl: uploaded.bannerOptimizedUrl || uploaded.secure_url,
-    },
+    image,
     cta: {
       text: ctaText ? ctaText.trim() : "Shop Now",
       link: ctaLink ? ctaLink.trim() : "/products",
     },
+
     styling: {
       textPosition: textPosition || "left",
       textColor: textColor || "#FFFFFF",

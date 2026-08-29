@@ -105,25 +105,23 @@ export const getCategoryById = asynchandler(async (req, res) => {
   );
 });
 
-// CREATE CATEGORY (admin only)
 export const createCategory = asynchandler(async (req, res) => {
-  const { name, slug, isHot, isFeatured } = req.body;
-  if (!name || !slug) {
-    throw new ApiError(400, "Category name and slug are required");
+  const { name, slug, subtitle, eyebrow, description, displayOrder, isHot, isFeatured } = req.body;
+
+  const categoryName = (name && name.trim()) || "New Wardrobe Category";
+  let cleanSlug =
+    (slug && slug.trim().toLowerCase().replace(/\s+/g, "-")) ||
+    categoryName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+  if (!cleanSlug) {
+    cleanSlug = `category-${Date.now().toString().slice(-6)}`;
   }
 
-  const cleanSlug = slug.trim().toLowerCase().replace(/\s+/g, "-");
-
-  const existing = await Category.findOne({
-    $or: [{ slug: cleanSlug }, { name: name.trim() }],
-  });
-
+  const existing = await Category.findOne({ slug: cleanSlug });
   if (existing) {
-    throw new ApiError(
-      409,
-      "A category with this name or slug already exists"
-    );
+    cleanSlug = `${cleanSlug}-${Date.now().toString().slice(-4)}`;
   }
+
 
   let image = { url: "", public_id: "", thumbnailUrl: "" };
   if (req.file) {
@@ -142,6 +140,10 @@ export const createCategory = asynchandler(async (req, res) => {
   const category = await Category.create({
     name: name.trim(),
     slug: cleanSlug,
+    subtitle: subtitle ? subtitle.trim() : "",
+    eyebrow: eyebrow ? eyebrow.trim() : "",
+    description: description ? description.trim() : "",
+    displayOrder: displayOrder !== undefined ? Number(displayOrder) : 0,
     image,
     isHot: isHot !== undefined ? isHot === "true" || isHot === true : false,
     isFeatured:
@@ -167,16 +169,21 @@ export const updateCategory = asynchandler(async (req, res) => {
   const category = await Category.findById(categoryid);
   if (!category) throw new ApiError(404, "Category not found");
 
-  const { name, slug, isHot, isFeatured } = req.body;
+  const { name, slug, subtitle, eyebrow, description, displayOrder, isHot, isFeatured } = req.body;
 
   if (name) category.name = name.trim();
   if (slug) category.slug = slug.trim().toLowerCase().replace(/\s+/g, "-");
+  if (subtitle !== undefined) category.subtitle = subtitle.trim();
+  if (eyebrow !== undefined) category.eyebrow = eyebrow.trim();
+  if (description !== undefined) category.description = description.trim();
+  if (displayOrder !== undefined) category.displayOrder = Number(displayOrder);
   if (isHot !== undefined) {
     category.isHot = isHot === "true" || isHot === true;
   }
   if (isFeatured !== undefined) {
     category.isFeatured = isFeatured === "true" || isFeatured === true;
   }
+
 
   if (req.file) {
     if (category.image?.public_id) {
@@ -239,6 +246,86 @@ export const toggleHotCategory = asynchandler(async (req, res) => {
   );
 });
 
+// GET ALL PRODUCTS UNDER A CATEGORY (By ID or slug)
+export const getCategoryProducts = asynchandler(async (req, res) => {
+  const { categoryid } = req.params;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 12));
+  const skip = (page - 1) * limit;
+  const { minPrice, maxPrice, isHot, isFeatured, sort, inStockOnly } = req.query;
+
+  let categoryDoc;
+  if (mongoose.Types.ObjectId.isValid(categoryid)) {
+    categoryDoc = await Category.findById(categoryid);
+  } else {
+    categoryDoc = await Category.findOne({ slug: categoryid.toLowerCase() });
+  }
+
+  if (!categoryDoc) {
+    throw new ApiError(404, "Category not found");
+  }
+
+  const filter = { category: categoryDoc._id, isActive: true };
+  if (minPrice || maxPrice) {
+    filter.price = {};
+    if (minPrice) filter.price.$gte = Number(minPrice);
+    if (maxPrice) filter.price.$lte = Number(maxPrice);
+  }
+  if (isHot !== undefined && isHot !== "") {
+    filter.isHot = isHot === "true" || isHot === true;
+  }
+  if (isFeatured !== undefined && isFeatured !== "") {
+    filter.isFeatured = isFeatured === "true" || isFeatured === true;
+  }
+  if (inStockOnly === "true") {
+    filter.stock = { $gt: 0 };
+  }
+
+  const sortOptions = {};
+  switch (sort) {
+    case "price-asc":
+      sortOptions.price = 1;
+      break;
+    case "price-desc":
+      sortOptions.price = -1;
+      break;
+    case "popular":
+      sortOptions["analytics.views"] = -1;
+      break;
+    case "newest":
+    default:
+      sortOptions.createdAt = -1;
+  }
+
+  const [products, total] = await Promise.all([
+    Product.find(filter)
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(limit)
+      .populate("category", "name slug"),
+    Product.countDocuments(filter),
+  ]);
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        category: categoryDoc,
+        products,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+          hasNextPage: page * limit < total,
+          hasPrevPage: page > 1,
+        },
+      },
+      `Products for category '${categoryDoc.name}' fetched successfully`
+    )
+  );
+});
+
 // DELETE CATEGORY (admin only)
 export const deleteCategory = asynchandler(async (req, res) => {
   const { categoryid } = req.params;
@@ -250,7 +337,6 @@ export const deleteCategory = asynchandler(async (req, res) => {
   const category = await Category.findById(categoryid);
   if (!category) throw new ApiError(404, "Category not found");
 
-  // Check if products exist in this category
   const productCount = await Product.countDocuments({ category: categoryid });
   if (productCount > 0) {
     throw new ApiError(
@@ -269,5 +355,7 @@ export const deleteCategory = asynchandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, {}, "Category deleted successfully"));
 });
+
+
 
 

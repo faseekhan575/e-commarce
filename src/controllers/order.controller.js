@@ -12,6 +12,7 @@ import { Product } from "../models/product.model.js";
 import { Cart } from "../models/cart.model.js";
 import { getIO } from "../socket.js";
 import { Parser } from "json2csv";
+import { sendOrderConfirmationEmail, sendOrderDispatchedEmail } from "../utils/mailer.js";
 
 
 // ===========================================================
@@ -61,12 +62,24 @@ export const placeOrder = asynchandler(async (req, res) => {
     }
   }
 
-  // Build order items (snapshot current price)
-  const items = cart.items.map((item) => ({
-    product: item.product._id,
-    quantity: item.quantity,
-    priceAtPurchase: item.product.discountPrice || item.product.price,
-  }));
+  // Build order items (snapshot current price, cost price, item profit, size, and color)
+  let totalOrderProfit = 0;
+  const items = cart.items.map((item) => {
+    const salePrice = item.product.discountPrice || item.product.price;
+    const costPrice = item.product.costPrice || 0;
+    const lineProfit = Math.max(0, salePrice - costPrice) * item.quantity;
+    totalOrderProfit += lineProfit;
+
+    return {
+      product: item.product._id,
+      quantity: item.quantity,
+      size: item.size || "M",
+      color: item.color || "",
+      priceAtPurchase: salePrice,
+      costPriceAtPurchase: costPrice,
+      itemProfit: lineProfit,
+    };
+  });
 
   // Calculate total
   const totalAmount = items.reduce(
@@ -74,16 +87,25 @@ export const placeOrder = asynchandler(async (req, res) => {
     0
   );
 
-  // Create order
+  // Create order with profit accounting and tracking timeline
   const order = await Order.create({
     user: req.user._id,
     items,
     totalAmount,
+    totalProfit: totalOrderProfit,
     shippingAddress,
     paymentMethod: paymentMethod || "cod",
     paymentStatus: "unpaid",
     status: "pending",
+    timeline: [
+      {
+        status: "pending",
+        note: "Order placed successfully by customer",
+        timestamp: new Date(),
+      },
+    ],
   });
+
 
   // Deduct stock and increment purchase analytics
   await Promise.all(
@@ -321,6 +343,17 @@ export const updateOrderStatus = asynchandler(async (req, res) => {
     }
     order.status = status;
 
+    if (status === "delivered") {
+      order.deliveredAt = new Date();
+    }
+
+    // Append to timeline
+    order.timeline.push({
+      status: order.status,
+      note: `Order status changed to '${order.status}' by Admin`,
+      timestamp: new Date(),
+    });
+
     // If order was cancelled now by admin, restore stock
     if (status === "cancelled" && previousStatus !== "cancelled") {
       await Promise.all(
@@ -347,13 +380,46 @@ export const updateOrderStatus = asynchandler(async (req, res) => {
     }
     order.paymentStatus = paymentStatus;
     order.isPaid = paymentStatus === "paid";
+    if (paymentStatus === "paid" && !order.paidAt) {
+      order.paidAt = new Date();
+    }
+    order.timeline.push({
+      status: order.status,
+      note: `Payment status marked as '${paymentStatus}'`,
+      timestamp: new Date(),
+    });
   }
 
   await order.save();
 
   const updatedOrder = await Order.findById(order._id)
     .populate("user", "fullname email")
-    .populate("items.product", "title price images");
+    .populate("items.product", "title price images sku");
+
+  // Real-time socket notification to customer and admin
+  try {
+    const io = getIO();
+    if (io) {
+      // Alert customer room
+      io.to(`user_${order.user}`).emit("order_status_updated", {
+        orderId: order._id,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        timeline: order.timeline,
+        updatedAt: order.updatedAt,
+      });
+
+      // Alert admin room
+      io.to("admin_room").emit("admin_order_updated", {
+        orderId: order._id,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        customerName: updatedOrder?.user?.fullname,
+      });
+    }
+  } catch (socketErr) {
+    console.error("Socket emit error:", socketErr.message);
+  }
 
   return res
     .status(200)
@@ -364,6 +430,85 @@ export const updateOrderStatus = asynchandler(async (req, res) => {
         "Order status updated successfully"
       )
     );
+});
+
+// ===========================================================
+// UPDATE ORDER TRACKING & COURIER DISPATCH (ADMIN ONLY)
+// ===========================================================
+export const updateOrderTracking = asynchandler(async (req, res) => {
+  const { orderid } = req.params;
+  const { trackingNumber, courier, trackingUrl, estimatedDelivery, note } =
+    req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(orderid)) {
+    throw new ApiError(400, "Invalid order ID format");
+  }
+
+  const order = await Order.findById(orderid);
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (trackingNumber !== undefined) order.trackingNumber = trackingNumber.trim();
+  if (courier !== undefined) order.courier = courier.trim();
+  if (trackingUrl !== undefined) order.trackingUrl = trackingUrl.trim();
+  if (estimatedDelivery !== undefined) {
+    order.estimatedDelivery = new Date(estimatedDelivery);
+  }
+
+  // If order was pending, advance to shipped when courier tracking is provided
+  if (trackingNumber && order.status === "pending") {
+    order.status = "shipped";
+  }
+
+  const trackingNote =
+    note ||
+    `Courier tracking updated: ${order.courier || "Courier"} (Tracking #${order.trackingNumber || "N/A"})`;
+
+  order.timeline.push({
+    status: order.status,
+    note: trackingNote,
+    timestamp: new Date(),
+  });
+
+  await order.save();
+
+  const updatedOrder = await Order.findById(order._id)
+    .populate("user", "fullname email username avatar")
+    .populate("items.product", "title price images sku");
+
+  // Real-time socket notification
+  try {
+    const io = getIO();
+    if (io) {
+      io.to(`user_${order.user}`).emit("order_status_updated", {
+        orderId: order._id,
+        status: order.status,
+        trackingNumber: order.trackingNumber,
+        courier: order.courier,
+        trackingUrl: order.trackingUrl,
+        timeline: order.timeline,
+        updatedAt: order.updatedAt,
+      });
+
+      io.to("admin_room").emit("admin_order_updated", {
+        orderId: order._id,
+        status: order.status,
+        trackingNumber: order.trackingNumber,
+        customerName: updatedOrder?.user?.fullname,
+      });
+    }
+  } catch (socketErr) {
+    console.error("Socket emit error:", socketErr.message);
+  }
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      updatedOrder,
+      "Order tracking details updated successfully"
+    )
+  );
 });
 
 // ===========================================================
@@ -381,9 +526,12 @@ export const downloadOrdersCSV = asynchandler(async (req, res) => {
     customerEmail: order.user?.email || "N/A",
     itemsCount: order.items?.length || 0,
     totalAmount: order.totalAmount,
+    totalProfit: order.totalProfit || 0,
     orderStatus: order.status,
     paymentStatus: order.paymentStatus,
     paymentMethod: order.paymentMethod,
+    courier: order.courier || "N/A",
+    trackingNumber: order.trackingNumber || "N/A",
     street: order.shippingAddress?.street || "N/A",
     city: order.shippingAddress?.city || "N/A",
     country: order.shippingAddress?.country || "N/A",
@@ -397,4 +545,5 @@ export const downloadOrdersCSV = asynchandler(async (req, res) => {
   res.header("Content-Type", "text/csv");
   res.attachment("orders.csv");
   return res.send(csv);
-});
+});
+

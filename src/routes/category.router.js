@@ -7,6 +7,7 @@ import {
   getAllCategories,
   getHotCategories,
   getCategoryById,
+  getCategoryProducts,
   createCategory,
   updateCategory,
   toggleHotCategory,
@@ -23,6 +24,7 @@ const categoryRouter = Router();
 
 // Get all categories (with product counts & isHot query)
 categoryRouter.route("/").get(getAllCategories);
+categoryRouter.route("/all").get(getAllCategories);
 
 // Get hot / featured categories for homepage carousel
 categoryRouter.route("/hot").get(getHotCategories);
@@ -38,6 +40,10 @@ categoryRouter
 // PARAM ROUTES
 // ============================================================
 categoryRouter.route("/:categoryid").get(getCategoryById);
+
+// Get all products under a specific category (by ID or slug)
+categoryRouter.route("/:categoryid/products").get(getCategoryProducts);
+
 
 categoryRouter
   .route("/:categoryid/update")
