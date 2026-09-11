@@ -132,6 +132,22 @@ export const addReview = asynchandler(async (req, res) => {
     "fullname avatar username"
   );
 
+  // Real-time socket notification to admin
+  try {
+    const io = getIO();
+    if (io) {
+      io.to("admin_room").emit("new_review", {
+        reviewId: review._id,
+        productId: productid,
+        rating: numRating,
+        comment: comment.trim(),
+        customerName: req.user?.fullname || req.user?.username || "Verified Buyer",
+      });
+    }
+  } catch (socketErr) {
+    console.error("Socket emit new_review error:", socketErr.message);
+  }
+
   return res
     .status(201)
     .json(new ApiResponse(201, populated, "Review submitted successfully"));

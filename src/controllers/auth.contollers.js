@@ -130,6 +130,21 @@ export const verifyOTP = asynchandler(async (req, res) => {
 
   const { accessToken, refreshToken } = await issueTokens(user, res);
 
+  // Real-time notification to admin
+  try {
+    const io = getIO();
+    if (io) {
+      io.to("admin_room").emit("new_user_registered", {
+        userId: user._id,
+        fullname: user.fullname,
+        email: user.email,
+        role: user.role,
+      });
+    }
+  } catch (socketErr) {
+    console.error("Socket emit new_user_registered error:", socketErr.message);
+  }
+
   res.status(200).json(
     new ApiResponse(200, { accessToken, refreshToken, role: user.role }, "Account verified and logged in successfully")
   );

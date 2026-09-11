@@ -109,14 +109,32 @@ export const placeOrder = asynchandler(async (req, res) => {
 
   // Deduct stock and increment purchase analytics
   await Promise.all(
-    cart.items.map((item) =>
-      Product.findByIdAndUpdate(item.product._id, {
-        $inc: {
-          stock: -item.quantity,
-          "analytics.purchased": item.quantity,
+    cart.items.map(async (item) => {
+      const updatedP = await Product.findByIdAndUpdate(
+        item.product._id,
+        {
+          $inc: {
+            stock: -item.quantity,
+            "analytics.purchased": item.quantity,
+          },
         },
-      })
-    )
+        { new: true }
+      );
+      if (updatedP && updatedP.stock <= 5) {
+        try {
+          const io = getIO();
+          if (io) {
+            io.to("admin_room").emit("low_stock", {
+              productId: updatedP._id,
+              title: updatedP.title,
+              stock: updatedP.stock,
+            });
+          }
+        } catch (sErr) {
+          console.error("Socket emit low_stock error:", sErr.message);
+        }
+      }
+    })
   );
 
   // Clear cart
