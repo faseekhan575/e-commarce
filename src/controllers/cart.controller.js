@@ -103,7 +103,10 @@ export const addToCart = asynchandler(async (req, res) => {
 
 // REMOVE ITEM FROM CART
 export const removeFromCart = asynchandler(async (req, res) => {
-  const { productId, size, color, itemId } = req.body;
+  const itemId = req.body?.itemId || req.query?.itemId;
+  const productId = req.body?.productId || req.query?.productId;
+  const size = req.body?.size || req.query?.size;
+  const color = req.body?.color || req.query?.color;
 
   const cart = await Cart.findOne({ user: req.user._id });
   if (!cart) throw new ApiError(404, "Cart not found");
@@ -138,8 +141,13 @@ export const clearCart = asynchandler(async (req, res) => {
 
 // UPDATE QUANTITY
 export const updateQuantity = asynchandler(async (req, res) => {
-  const { productId, quantity, size, color, itemId } = req.body;
-  if (!quantity || quantity < 1) throw new ApiError(400, "Quantity must be at least 1");
+  const itemId = req.body?.itemId || req.query?.itemId;
+  const productId = req.body?.productId || req.query?.productId;
+  const quantity = req.body?.quantity ?? req.query?.quantity;
+  const size = req.body?.size || req.query?.size;
+  const color = req.body?.color || req.query?.color;
+
+  if (!quantity || Number(quantity) < 1) throw new ApiError(400, "Quantity must be at least 1");
 
   const cart = await Cart.findOne({ user: req.user._id });
   if (!cart) throw new ApiError(404, "Cart not found");

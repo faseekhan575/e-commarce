@@ -34,58 +34,114 @@ export const getAllProducts = asynchandler(async (req, res) => {
     isHot,
     isFeatured,
     fabric,
+    sizes,
+    size,
+    stitching,
+    stitchingType,
   } = req.query;
 
-  const query = { isActive: true };
+  const andConditions = [{ isActive: true }];
 
   // hot & featured filters
   if (isHot !== undefined && isHot !== "") {
-    query.isHot = isHot === "true" || isHot === true;
+    andConditions.push({ isHot: isHot === "true" || isHot === true });
   }
   if (isFeatured !== undefined && isFeatured !== "") {
-    query.isFeatured = isFeatured === "true" || isFeatured === true;
+    andConditions.push({ isFeatured: isFeatured === "true" || isFeatured === true });
   }
 
   // category filter (can be category id or slug)
   if (category) {
     if (mongoose.Types.ObjectId.isValid(category)) {
-      query.category = category;
+      andConditions.push({ category });
     } else {
       const catDoc = await Category.findOne({ slug: category.toLowerCase() });
-      if (catDoc) query.category = catDoc._id;
+      if (catDoc) {
+        andConditions.push({ category: catDoc._id });
+      } else {
+        andConditions.push({ category: new mongoose.Types.ObjectId() });
+      }
     }
   }
 
   // fabric filter
   if (fabric && fabric.toLowerCase() !== "all" && fabric.toLowerCase() !== "all fabrics") {
     const cleanFabric = fabric.trim().replace(/[-_]/g, " ");
-    query.$or = [
-      { fabricType: { $regex: cleanFabric, $options: "i" } },
-      { fabric: { $regex: cleanFabric, $options: "i" } },
-      { productTypeTag: { $regex: cleanFabric, $options: "i" } },
-    ];
+    andConditions.push({
+      $or: [
+        { fabricType: { $regex: cleanFabric, $options: "i" } },
+        { fabric: { $regex: cleanFabric, $options: "i" } },
+        { productTypeTag: { $regex: cleanFabric, $options: "i" } },
+      ],
+    });
   }
 
-  // search filter (title, description, tags)
+  // search filter (title, description, tags, productTypeTag)
   if (search) {
-    query.$or = [
-      { title: { $regex: search.trim(), $options: "i" } },
-      { description: { $regex: search.trim(), $options: "i" } },
-      { tags: { $regex: search.trim(), $options: "i" } },
-    ];
+    const cleanSearch = search.trim();
+    andConditions.push({
+      $or: [
+        { title: { $regex: cleanSearch, $options: "i" } },
+        { description: { $regex: cleanSearch, $options: "i" } },
+        { tags: { $regex: cleanSearch, $options: "i" } },
+        { productTypeTag: { $regex: cleanSearch, $options: "i" } },
+      ],
+    });
   }
 
   // price range filter
   if (minPrice || maxPrice) {
-    query.price = {};
-    if (minPrice) query.price.$gte = Number(minPrice);
-    if (maxPrice) query.price.$lte = Number(maxPrice);
+    const priceCondition = {};
+    if (minPrice) priceCondition.$gte = Number(minPrice);
+    if (maxPrice) priceCondition.$lte = Number(maxPrice);
+    andConditions.push({ price: priceCondition });
   }
 
   // stock filter
   if (inStock === "true") {
-    query.stock = { $gt: 0 };
+    andConditions.push({ stock: { $gt: 0 } });
   }
+
+  // size filter
+  const rawSizes = sizes || size;
+  if (rawSizes) {
+    const sizeList = rawSizes
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+    if (sizeList.length > 0) {
+      andConditions.push({
+        $or: [
+          { sizes: { $in: sizeList } },
+          { "sizeVariants.size": { $in: sizeList } },
+        ],
+      });
+    }
+  }
+
+  // stitching filter
+  const rawStitching = (stitching || stitchingType || "").toLowerCase();
+  if (rawStitching === "stitched") {
+    andConditions.push({
+      $or: [
+        { stitchingType: { $regex: /stitched|ready/i } },
+        { productTypeTag: { $regex: /stitched|ready|pret/i } },
+        { tags: { $regex: /stitched|ready|pret/i } },
+        { title: { $regex: /stitched|ready|pret/i } },
+      ],
+    });
+  } else if (rawStitching === "unstitched") {
+    andConditions.push({
+      $or: [
+        { stitchingType: { $regex: /unstitched/i } },
+        { productTypeTag: { $regex: /unstitched/i } },
+        { tags: { $regex: /unstitched/i } },
+        { title: { $regex: /unstitched/i } },
+      ],
+    });
+  }
+
+  const query = andConditions.length > 1 ? { $and: andConditions } : andConditions[0];
 
   // sorting options
   let sortOption = { createdAt: -1 };
@@ -109,14 +165,21 @@ export const getAllProducts = asynchandler(async (req, res) => {
     Product.countDocuments(query),
   ]);
 
+  const totalPages = Math.ceil(totalProducts / limit) || 1;
+  const hasMore = page < totalPages;
+
   return res.status(200).json(
     new ApiResponse(
       200,
       {
         products,
         totalProducts,
+        total: totalProducts,
         currentPage: page,
-        totalPages: Math.ceil(totalProducts / limit),
+        page,
+        limit,
+        totalPages,
+        hasMore,
       },
       "Products fetched successfully"
     )

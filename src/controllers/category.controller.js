@@ -312,6 +312,13 @@ export const getCategoryProducts = asynchandler(async (req, res) => {
       {
         category: categoryDoc,
         products,
+        totalProducts: total,
+        total,
+        currentPage: page,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        hasMore: page * limit < total,
         pagination: {
           total,
           page,

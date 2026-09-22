@@ -72,7 +72,17 @@ const orderSchema = new Schema(
 
     paymentMethod: {
       type: String,
-      enum: ["cod", "card", "jazzcash", "easypaisa"],
+      enum: [
+        "cod",
+        "card",
+        "jazzcash",
+        "easypaisa",
+        "payfast",
+        "payfast_card",
+        "payfast_easypaisa",
+        "payfast_jazzcash",
+        "payfast_googlepay",
+      ],
       default: "cod",
     },
 
